@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import { Action, Ctx, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
 
@@ -12,12 +13,14 @@ import {
 
 import { CourseService } from 'src/course/services/course.service';
 import { AcademicService } from 'src/academic/services/academic.services';
+
 import { courseKeyboard } from 'src/bot/keyboards/course.keyboard';
 import { departmentKeyboard } from 'src/bot/keyboards/department.keyboard';
 import { levelKeyboard } from 'src/bot/keyboards/level.keyboard';
 import { termKeyboard } from 'src/bot/keyboards/term.keyboard';
 import { academicYearKeyboard } from 'src/bot/keyboards/academic-year.keyboard';
 import { trackKeyboard } from 'src/bot/keyboards/track.keyboard';
+
 import { BotEventConflictService } from 'src/bot/services/bot-conflict.service';
 
 @Update()
@@ -31,9 +34,6 @@ export class AssignCourseHandler {
 
   // ============================================================
   // بدء عملية إسناد كورس
-  // Callback:
-  //
-  // ac
   // ============================================================
 
   @Action('ac')
@@ -46,10 +46,6 @@ export class AssignCourseHandler {
       return;
     }
 
-    // ============================================================
-    // التأكد من عدم وجود عملية أخرى
-    // ============================================================
-
     const existingEvent = this.botEventService.get(userId);
 
     if (existingEvent) {
@@ -57,10 +53,6 @@ export class AssignCourseHandler {
 
       return;
     }
-
-    // ============================================================
-    // جلب الكورسات
-    // ============================================================
 
     const page = 1;
     const limit = 8;
@@ -75,27 +67,24 @@ export class AssignCourseHandler {
       return;
     }
 
-    // ============================================================
-    // عرض الكورسات
-    // ============================================================
-
     const message = await ctx.reply(
-      '📚 <b>إسناد كورس إلى فصل</b>\n\n' + 'اختر الكورس الذي تريد إسناده:',
+      '📚 <b>إسناد كورس إلى فصل</b>\n\n' + 'اختر الكورس:',
       {
         parse_mode: 'HTML',
+
         ...courseKeyboard(result.courses, 'ac', result.page, result.totalPages),
       },
     );
 
-    // ============================================================
-    // حفظ Event
-    // ============================================================
-
     this.botEventService.set({
       userId,
+
       event: BotEventType.WAITING_COURSE_OFFERING_COURSE,
+
       messageId: message.message_id,
+
       chatId: String(ctx.chat?.id ?? ''),
+
       data: {
         page,
       },
@@ -105,12 +94,7 @@ export class AssignCourseHandler {
   // ============================================================
   // اختيار الكورس
   //
-  // Callback:
-  //
   // ac/courseId
-  //
-  // مثال:
-  // ac/12
   // ============================================================
 
   @Action(/^ac\/(\d+)$/)
@@ -124,19 +108,14 @@ export class AssignCourseHandler {
     }
 
     const event = this.botEventService.get(userId);
-    console.log(event);
 
     if (!event) {
-      await ctx.reply(
-        'ℹ️ انتهت عملية الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
+      await ctx.answerCbQuery('انتهت عملية الإسناد.', {
+        show_alert: true,
+      });
 
       return;
     }
-
-    // ============================================================
-    // التأكد من المرحلة
-    // ============================================================
 
     if (event.event !== BotEventType.WAITING_COURSE_OFFERING_COURSE) {
       return;
@@ -148,73 +127,49 @@ export class AssignCourseHandler {
       return;
     }
 
-    // ============================================================
-    // التأكد من وجود الكورس
-    // ============================================================
-
     const course = await this.courseService.getCourseById(courseId);
 
     if (!course) {
-      await ctx.reply(
-        '❌ الكورس المطلوب غير موجود.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
-      this.botEventService.delete(userId);
+      await ctx.answerCbQuery('الكورس غير موجود.', {
+        show_alert: true,
+      });
 
       return;
     }
-
-    // ============================================================
-    // جلب الأقسام
-    // ============================================================
 
     const departments = await this.academicService.getDepartments();
 
     if (!departments.length) {
-      await ctx.reply('❌ لا توجد أقسام دراسية حاليًا.');
+      await this.editCurrentMessage(ctx, '❌ لا توجد أقسام دراسية حاليًا.');
 
       this.botEventService.delete(userId);
 
       return;
     }
 
-    // ============================================================
-    // تحديث Event
-    // ============================================================
-
     this.botEventService.update(userId, {
       event: BotEventType.WAITING_COURSE_OFFERING_DEPARTMENT,
+
       data: {
         courseId,
       },
     });
 
-    // ============================================================
-    // عرض الأقسام
-    //
-    // ac/courseId/departmentId
-    // ============================================================
+    await this.editCurrentMessage(
+      ctx,
 
-    await ctx.reply(
       '📚 <b>الكورس:</b> ' +
         `<b>${this.escapeHtml(course.name)}</b>\n\n` +
         '🏫 اختر القسم:',
-      {
-        parse_mode: 'HTML',
-        ...departmentKeyboard(departments, `ac/${courseId}`),
-      },
+
+      departmentKeyboard(departments, `ac/${courseId}`),
     );
   }
 
   // ============================================================
   // اختيار القسم
   //
-  // Callback:
-  //
   // ac/courseId/departmentId
-  //
-  // مثال:
-  // ac/12/2
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)$/)
@@ -230,9 +185,9 @@ export class AssignCourseHandler {
     const event = this.botEventService.get(userId);
 
     if (!event) {
-      await ctx.reply(
-        'ℹ️ انتهت عملية الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
+      await ctx.answerCbQuery('انتهت عملية الإسناد.', {
+        show_alert: true,
+      });
 
       return;
     }
@@ -249,87 +204,57 @@ export class AssignCourseHandler {
 
     const [courseId, departmentId] = ids;
 
-    // ============================================================
-    // التأكد من البيانات المحفوظة
-    // ============================================================
-
     if (event.data?.courseId !== courseId) {
-      await ctx.reply(
-        '❌ بيانات العملية غير صحيحة.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
-      this.botEventService.delete(userId);
+      await this.resetProcess(ctx, userId);
 
       return;
     }
-
-    // ============================================================
-    // التأكد من وجود القسم
-    // ============================================================
 
     const department =
       await this.academicService.getDepartmentById(departmentId);
 
     if (!department) {
-      await ctx.reply('❌ القسم المطلوب غير موجود.');
-
-      this.botEventService.delete(userId);
+      await ctx.answerCbQuery('القسم غير موجود.', {
+        show_alert: true,
+      });
 
       return;
     }
-
-    // ============================================================
-    // جلب المستويات
-    // ============================================================
 
     const levels = await this.academicService.getLevels();
 
     if (!levels.length) {
-      await ctx.reply('❌ لا توجد مستويات دراسية حاليًا.');
+      await this.editCurrentMessage(ctx, '❌ لا توجد مستويات دراسية حاليًا.');
 
       this.botEventService.delete(userId);
 
       return;
     }
 
-    // ============================================================
-    // تحديث Event
-    // ============================================================
-
     this.botEventService.update(userId, {
       event: BotEventType.WAITING_COURSE_OFFERING_LEVEL,
+
       data: {
         courseId,
         departmentId,
       },
     });
 
-    // ============================================================
-    // عرض المستويات
-    //
-    // ac/courseId/departmentId/levelId
-    // ============================================================
+    await this.editCurrentMessage(
+      ctx,
 
-    await ctx.reply(
       '🏫 <b>القسم:</b> ' +
         `<b>${this.escapeHtml(department.name)}</b>\n\n` +
         '🎓 اختر المستوى:',
-      {
-        parse_mode: 'HTML',
-        ...levelKeyboard(levels, `ac/${courseId}/${departmentId}`),
-      },
+
+      levelKeyboard(levels, `ac/${courseId}/${departmentId}`),
     );
   }
 
   // ============================================================
   // اختيار المستوى
   //
-  // Callback:
-  //
   // ac/courseId/departmentId/levelId
-  //
-  // مثال:
-  // ac/12/2/3
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)\/(\d+)$/)
@@ -345,17 +270,10 @@ export class AssignCourseHandler {
     const event = this.botEventService.get(userId);
 
     if (!event) {
-      await ctx.reply(
-        'ℹ️ انتهت عملية الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
       return;
     }
 
-    console.log(event);
-
     if (event.event !== BotEventType.WAITING_COURSE_OFFERING_LEVEL) {
-      console.log('event not exists');
       return;
     }
 
@@ -367,45 +285,24 @@ export class AssignCourseHandler {
 
     const [courseId, departmentId, levelId] = ids;
 
-    // ============================================================
-    // التأكد من البيانات السابقة
-    // ============================================================
-
     if (
       event.data?.courseId !== courseId ||
       event.data?.departmentId !== departmentId
     ) {
-      await ctx.reply(
-        '❌ بيانات العملية غير صحيحة.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
-      this.botEventService.delete(userId);
+      await this.resetProcess(ctx, userId);
 
       return;
     }
-
-    // ============================================================
-    // التأكد من وجود المستوى
-    // ============================================================
 
     const level = await this.academicService.getLevelById(levelId);
 
     if (!level) {
-      await ctx.reply('❌ المستوى المطلوب غير موجود.');
-
-      this.botEventService.delete(userId);
+      await ctx.answerCbQuery('المستوى غير موجود.', {
+        show_alert: true,
+      });
 
       return;
     }
-
-    // ============================================================
-    // التحقق من الـ Track
-    //
-    // إذا كان للقسم Tracks وكان المستوى 3 أو 4
-    // نطلب من المستخدم اختيار Track.
-    //
-    // غير ذلك ننتقل مباشرة إلى Term.
-    // ============================================================
 
     const tracks =
       await this.academicService.getTracksByDepartmentId(departmentId);
@@ -413,13 +310,14 @@ export class AssignCourseHandler {
     const requiresTrack =
       (level.number === 3 || level.number === 4) && tracks.length > 0;
 
-    // ============================================================
+    // ------------------------------------------------------------
     // يحتاج Track
-    // ============================================================
+    // ------------------------------------------------------------
 
     if (requiresTrack) {
       this.botEventService.update(userId, {
         event: BotEventType.WAITING_COURSE_OFFERING_TRACK,
+
         data: {
           courseId,
           departmentId,
@@ -427,87 +325,40 @@ export class AssignCourseHandler {
         },
       });
 
-      await ctx.reply(
+      await this.editCurrentMessage(
+        ctx,
+
         '🎓 <b>' +
           `${this.escapeHtml(level.name)}` +
           '</b>\n\n' +
           '🛤️ اختر التراك:',
-        {
-          parse_mode: 'HTML',
-          ...trackKeyboard(tracks, `ac/${courseId}/${departmentId}/${levelId}`),
-        },
+
+        trackKeyboard(tracks, `ac/${courseId}/${departmentId}/${levelId}`),
       );
 
       return;
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     // لا يحتاج Track
-    // ============================================================
+    // ------------------------------------------------------------
 
-    const terms = await this.academicService.getTerms();
-
-    if (!terms.length) {
-      await ctx.reply('❌ لا توجد ترمات دراسية حاليًا.');
-
-      this.botEventService.delete(userId);
-
-      return;
-    }
-
-    this.botEventService.update(userId, {
-      event: BotEventType.WAITING_COURSE_OFFERING_TERM,
-      data: {
-        courseId,
-        departmentId,
-        levelId,
-        trackId: undefined,
-      },
+    await this.showTerms(ctx, userId, {
+      courseId,
+      departmentId,
+      levelId,
+      trackId: undefined,
     });
-
-    // ============================================================
-    // عرض الترم
-    //
-    // ac/courseId/departmentId/levelId/termId
-    // ============================================================
-
-    await ctx.reply(
-      '🎓 <b>' +
-        `${this.escapeHtml(level.name)}` +
-        '</b>\n\n' +
-        '📖 اختر الترم:',
-      {
-        parse_mode: 'HTML',
-        ...termKeyboard(terms, `ac/${courseId}/${departmentId}/${levelId}`),
-      },
-    );
   }
 
   // ============================================================
   // اختيار Track
   //
-  // Callback:
-  //
   // ac/courseId/departmentId/levelId/trackId
-  //
-  // مثال:
-  // ac/12/2/3/1
-  // ============================================================
-
-  // ============================================================
-  // Callback بأربعة IDs
-  //
-  // في حالة Track:
-  // ac/courseId/departmentId/levelId/trackId
-  //
-  // في حالة بدون Track:
-  // ac/courseId/departmentId/levelId/termId
-  //
-  // الفرق بينهما يتم تحديده من BotEventType
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async handleFourIds(@Ctx() ctx: Context): Promise<void> {
+  async selectTrack(@Ctx() ctx: Context): Promise<void> {
     await ctx.answerCbQuery();
 
     const userId = ctx.from?.id;
@@ -519,7 +370,10 @@ export class AssignCourseHandler {
     const event = this.botEventService.get(userId);
 
     if (!event) {
-      await ctx.reply('ℹ️ انتهت عملية الإسناد.\n\nيرجى بدء العملية من جديد.');
+      return;
+    }
+
+    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TRACK) {
       return;
     }
 
@@ -529,242 +383,91 @@ export class AssignCourseHandler {
       return;
     }
 
-    // ============================================================
-    // الحالة الأولى:
-    // المستخدم في مرحلة اختيار Track
-    // ============================================================
+    const [courseId, departmentId, levelId, trackId] = ids;
 
-    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TRACK) {
-      const [courseId, departmentId, levelId, trackId] = ids;
-
-      // ----------------------------------------------------------
-      // التأكد من البيانات السابقة
-      // ----------------------------------------------------------
-
-      if (
-        event.data?.courseId !== courseId ||
-        event.data?.departmentId !== departmentId ||
-        event.data?.levelId !== levelId
-      ) {
-        await ctx.reply(
-          '❌ بيانات العملية غير صحيحة.\n\nيرجى بدء العملية من جديد.',
-        );
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // التأكد من المستوى
-      // ----------------------------------------------------------
-
-      const level = await this.academicService.getLevelById(levelId);
-
-      if (!level) {
-        await ctx.reply('❌ المستوى المطلوب غير موجود.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      if (level.number !== 3 && level.number !== 4) {
-        await ctx.reply('❌ هذا المستوى لا يحتوي على تراك.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // التأكد من Track
-      // ----------------------------------------------------------
-
-      const tracks =
-        await this.academicService.getTracksByDepartmentId(departmentId);
-
-      const track = tracks.find((item) => item.id === trackId);
-
-      if (!track) {
-        await ctx.reply('❌ التراك المطلوب غير تابع لهذا القسم.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // جلب الترمات
-      // ----------------------------------------------------------
-
-      const terms = await this.academicService.getTerms();
-
-      if (!terms.length) {
-        await ctx.reply('❌ لا توجد ترمات دراسية حاليًا.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // الانتقال إلى الترم
-      // ----------------------------------------------------------
-
-      this.botEventService.update(userId, {
-        event: BotEventType.WAITING_COURSE_OFFERING_TERM,
-
-        data: {
-          courseId,
-          departmentId,
-          levelId,
-          trackId,
-        },
-      });
-
-      await ctx.reply(
-        '🛤️ <b>' +
-          `${this.escapeHtml(track.name)}` +
-          '</b>\n\n' +
-          '📖 اختر الترم:',
-        {
-          parse_mode: 'HTML',
-
-          ...termKeyboard(
-            terms,
-            `ac/${courseId}/${departmentId}/${levelId}/${trackId}`,
-          ),
-        },
-      );
+    if (
+      event.data?.courseId !== courseId ||
+      event.data?.departmentId !== departmentId ||
+      event.data?.levelId !== levelId
+    ) {
+      await this.resetProcess(ctx, userId);
 
       return;
     }
 
-    // ============================================================
-    // الحالة الثانية:
-    // المستخدم في مرحلة اختيار الترم بدون Track
-    // ============================================================
+    const tracks =
+      await this.academicService.getTracksByDepartmentId(departmentId);
 
-    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TERM) {
-      const [courseId, departmentId, levelId, termId] = ids;
+    const track = tracks.find((item) => item.id === trackId);
 
-      // ----------------------------------------------------------
-      // التأكد من البيانات السابقة
-      // ----------------------------------------------------------
-
-      if (
-        event.data?.courseId !== courseId ||
-        event.data?.departmentId !== departmentId ||
-        event.data?.levelId !== levelId
-      ) {
-        await ctx.reply(
-          '❌ بيانات العملية غير صحيحة.\n\nيرجى بدء العملية من جديد.',
-        );
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // يجب ألا يكون هناك Track
-      // ----------------------------------------------------------
-
-      if (event.data?.trackId !== undefined) {
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // التأكد من الترم
-      // ----------------------------------------------------------
-
-      const term = await this.academicService.getTermById(termId);
-
-      if (!term) {
-        await ctx.reply('❌ الترم المطلوب غير موجود.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // جلب السنوات
-      // ----------------------------------------------------------
-
-      const years = await this.academicService.getAcademicYears();
-
-      if (!years.length) {
-        await ctx.reply('❌ لا توجد سنوات دراسية حاليًا.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // الانتقال إلى السنة
-      // ----------------------------------------------------------
-
-      this.botEventService.update(userId, {
-        event: BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR,
-
-        data: {
-          courseId,
-          departmentId,
-          levelId,
-          termId,
-          trackId: undefined,
-        },
+    if (!track) {
+      await ctx.answerCbQuery('التراك غير تابع لهذا القسم.', {
+        show_alert: true,
       });
-
-      await ctx.reply(
-        '📖 <b>' +
-          `${this.escapeHtml(term.name)}` +
-          '</b>\n\n' +
-          '📅 اختر السنة الدراسية:',
-        {
-          parse_mode: 'HTML',
-
-          ...academicYearKeyboard(
-            years,
-            `ac/${courseId}/${departmentId}/${levelId}/${termId}`,
-          ),
-        },
-      );
 
       return;
     }
+
+    await this.showTerms(ctx, userId, {
+      courseId,
+      departmentId,
+      levelId,
+      trackId,
+    });
   }
+
+  // ============================================================
+  // عرض الترمات
+  // ============================================================
+
+  private async showTerms(
+    ctx: Context,
+    userId: number,
+    data: {
+      courseId: number;
+      departmentId: number;
+      levelId: number;
+      trackId?: number;
+    },
+  ): Promise<void> {
+    const terms = await this.academicService.getTerms();
+
+    if (!terms.length) {
+      await this.editCurrentMessage(ctx, '❌ لا توجد ترمات دراسية حاليًا.');
+
+      this.botEventService.delete(userId);
+
+      return;
+    }
+
+    this.botEventService.update(userId, {
+      event: BotEventType.WAITING_COURSE_OFFERING_TERM,
+
+      data,
+    });
+
+    const prefix =
+      data.trackId !== undefined
+        ? `ac/${data.courseId}/${data.departmentId}/${data.levelId}/${data.trackId}`
+        : `ac/${data.courseId}/${data.departmentId}/${data.levelId}`;
+
+    await this.editCurrentMessage(
+      ctx,
+
+      '📖 <b>اختر الترم:</b>',
+
+      termKeyboard(terms, prefix),
+    );
+  }
+
   // ============================================================
   // اختيار الترم بدون Track
   //
-  // Callback:
-  //
   // ac/courseId/departmentId/levelId/termId
-  //
-  // مثال:
-  // ac/12/2/1/1
   // ============================================================
 
-  // ============================================================
-  // اختيار الترم مع Track
-  //
-  // Callback:
-  //
-  // ac/courseId/departmentId/levelId/trackId/termId
-  //
-  // مثال:
-  // ac/12/2/3/1/1
-  // ============================================================
-
-  // ============================================================
-  // Callback بخمسة IDs
-  //
-  // بدون Track:
-  // ac/courseId/departmentId/levelId/termId/yearId
-  //
-  // مع Track:
-  // ac/courseId/departmentId/levelId/trackId/termId
-  //
-  // الفرق يتم تحديده من BotEventType
-  // ============================================================
-
-  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async handleFiveIds(@Ctx() ctx: Context): Promise<void> {
+  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
+  async selectTerm(@Ctx() ctx: Context): Promise<void> {
     await ctx.answerCbQuery();
 
     const userId = ctx.from?.id;
@@ -779,162 +482,231 @@ export class AssignCourseHandler {
       return;
     }
 
+    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TERM) {
+      return;
+    }
+
+    const ids = this.getCallbackIds(ctx, 4);
+
+    if (!ids) {
+      return;
+    }
+
+    const [courseId, departmentId, levelId, termId] = ids;
+
+    // ------------------------------------------------------------
+    // هذه الحالة تكون بدون Track
+    // ------------------------------------------------------------
+
+    if (event.data?.trackId !== undefined) {
+      return;
+    }
+
+    if (
+      event.data?.courseId !== courseId ||
+      event.data?.departmentId !== departmentId ||
+      event.data?.levelId !== levelId
+    ) {
+      await this.resetProcess(ctx, userId);
+
+      return;
+    }
+
+    await this.handleTermSelection(ctx, userId, event, {
+      courseId,
+      departmentId,
+      levelId,
+      termId,
+      trackId: undefined,
+    });
+  }
+
+  // ============================================================
+  // اختيار الترم مع Track
+  //
+  // ac/courseId/departmentId/levelId/trackId/termId
+  // ============================================================
+
+  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
+  async selectTermWithTrack(@Ctx() ctx: Context): Promise<void> {
+    await ctx.answerCbQuery();
+
+    const userId = ctx.from?.id;
+
+    if (!userId) {
+      return;
+    }
+
+    const event = this.botEventService.get(userId);
+
+    if (!event) {
+      return;
+    }
+
+    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TERM) {
+      return;
+    }
+
     const ids = this.getCallbackIds(ctx, 5);
 
     if (!ids) {
       return;
     }
 
-    // ============================================================
-    // الحالة الأولى:
-    // اختيار الترم مع Track
-    //
-    // ac/course/department/level/track/term
-    // ============================================================
+    const [courseId, departmentId, levelId, trackId, termId] = ids;
 
-    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TERM) {
-      const [courseId, departmentId, levelId, trackId, termId] = ids;
+    // ------------------------------------------------------------
+    // هذه الحالة يجب أن تكون مع Track
+    // ------------------------------------------------------------
 
-      // ----------------------------------------------------------
-      // التأكد من البيانات السابقة
-      // ----------------------------------------------------------
+    if (event.data?.trackId !== trackId) {
+      return;
+    }
 
-      if (
-        event.data?.courseId !== courseId ||
-        event.data?.departmentId !== departmentId ||
-        event.data?.levelId !== levelId ||
-        event.data?.trackId !== trackId
-      ) {
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // التأكد من الترم
-      // ----------------------------------------------------------
-
-      const term = await this.academicService.getTermById(termId);
-
-      if (!term) {
-        await ctx.reply('❌ الترم المطلوب غير موجود.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // جلب السنوات
-      // ----------------------------------------------------------
-
-      const years = await this.academicService.getAcademicYears();
-
-      if (!years.length) {
-        await ctx.reply('❌ لا توجد سنوات دراسية حاليًا.');
-
-        this.botEventService.delete(userId);
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // الانتقال إلى السنة
-      // ----------------------------------------------------------
-
-      this.botEventService.update(userId, {
-        event: BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR,
-
-        data: {
-          courseId,
-          departmentId,
-          levelId,
-          trackId,
-          termId,
-        },
-      });
-
-      await ctx.reply(
-        '📖 <b>' +
-          `${this.escapeHtml(term.name)}` +
-          '</b>\n\n' +
-          '📅 اختر السنة الدراسية:',
-        {
-          parse_mode: 'HTML',
-
-          ...academicYearKeyboard(
-            years,
-            `ac/${courseId}/${departmentId}/${levelId}/${trackId}/${termId}`,
-          ),
-        },
-      );
+    if (
+      event.data?.courseId !== courseId ||
+      event.data?.departmentId !== departmentId ||
+      event.data?.levelId !== levelId
+    ) {
+      await this.resetProcess(ctx, userId);
 
       return;
     }
 
-    // ============================================================
-    // الحالة الثانية:
-    // اختيار السنة بدون Track
-    //
-    // ac/course/department/level/term/year
-    // ============================================================
-
-    if (event.event === BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR) {
-      const [courseId, departmentId, levelId, termId, academicYearId] = ids;
-
-      // ----------------------------------------------------------
-      // التأكد من البيانات السابقة
-      // ----------------------------------------------------------
-
-      if (
-        event.data?.courseId !== courseId ||
-        event.data?.departmentId !== departmentId ||
-        event.data?.levelId !== levelId ||
-        event.data?.termId !== termId
-      ) {
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // يجب ألا يكون هناك Track
-      // ----------------------------------------------------------
-
-      if (event.data?.trackId !== undefined) {
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // إنهاء الإسناد
-      // ----------------------------------------------------------
-
-      await this.finishAssignment(ctx, userId, {
-        courseId,
-        departmentId,
-        levelId,
-        trackId: undefined,
-        termId,
-        academicYearId,
-      });
-
-      return;
-    }
+    await this.handleTermSelection(ctx, userId, event, {
+      courseId,
+      departmentId,
+      levelId,
+      trackId,
+      termId,
+    });
   }
-  // ============================================================
-  // اختيار السنة الدراسية بدون Track
-  //
-  // Callback:
-  //
-  // ac/courseId/departmentId/levelId/termId/academicYearId
-  //
-  // مثال:
-  // ac/12/2/3/1/5
-  // ============================================================
 
   // ============================================================
-  // اختيار السنة الدراسية مع Track
+  // معالجة اختيار الترم
+  // ============================================================
+
+  private async handleTermSelection(
+    ctx: Context,
+    userId: number,
+    event: any,
+    data: {
+      courseId: number;
+      departmentId: number;
+      levelId: number;
+      trackId?: number;
+      termId: number;
+    },
+  ): Promise<void> {
+    const term = await this.academicService.getTermById(data.termId);
+
+    if (!term) {
+      await ctx.answerCbQuery('الترم غير موجود.', {
+        show_alert: true,
+      });
+
+      return;
+    }
+
+    const years = await this.academicService.getAcademicYears();
+
+    if (!years.length) {
+      await this.editCurrentMessage(ctx, '❌ لا توجد سنوات دراسية حاليًا.');
+
+      this.botEventService.delete(userId);
+
+      return;
+    }
+
+    this.botEventService.update(userId, {
+      event: BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR,
+
+      data,
+    });
+
+    const prefix =
+      data.trackId !== undefined
+        ? `ac/${data.courseId}/${data.departmentId}/${data.levelId}/${data.trackId}/${data.termId}`
+        : `ac/${data.courseId}/${data.departmentId}/${data.levelId}/${data.termId}`;
+
+    await this.editCurrentMessage(
+      ctx,
+
+      '📖 <b>الترم:</b> ' +
+        `<b>${this.escapeHtml(term.name)}</b>\n\n` +
+        '📅 اختر السنة الدراسية:',
+
+      academicYearKeyboard(years, prefix),
+    );
+  }
+
+  // ============================================================
+  // اختيار السنة بدون Track
   //
-  // Callback:
+  // ac/courseId/departmentId/levelId/termId/yearId
+  // ============================================================
+
+  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
+  async selectAcademicYear(@Ctx() ctx: Context): Promise<void> {
+    await ctx.answerCbQuery();
+
+    const userId = ctx.from?.id;
+
+    if (!userId) {
+      return;
+    }
+
+    const event = this.botEventService.get(userId);
+
+    if (!event) {
+      return;
+    }
+
+    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR) {
+      return;
+    }
+
+    const ids = this.getCallbackIds(ctx, 5);
+
+    if (!ids) {
+      return;
+    }
+
+    const [courseId, departmentId, levelId, termId, academicYearId] = ids;
+
+    // ------------------------------------------------------------
+    // إذا كان Track موجودًا فهذه ليست حالة بدون Track
+    // ------------------------------------------------------------
+
+    if (event.data?.trackId !== undefined) {
+      return;
+    }
+
+    if (
+      event.data?.courseId !== courseId ||
+      event.data?.departmentId !== departmentId ||
+      event.data?.levelId !== levelId ||
+      event.data?.termId !== termId
+    ) {
+      await this.resetProcess(ctx, userId);
+
+      return;
+    }
+
+    await this.finishAssignment(ctx, userId, {
+      courseId,
+      departmentId,
+      levelId,
+      trackId: undefined,
+      termId,
+      academicYearId,
+    });
+  }
+
+  // ============================================================
+  // اختيار السنة مع Track
   //
-  // ac/courseId/departmentId/levelId/trackId/termId/academicYearId
-  //
-  // مثال:
-  // ac/12/2/3/1/1/5
+  // ac/courseId/departmentId/levelId/trackId/termId/yearId
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
@@ -966,17 +738,18 @@ export class AssignCourseHandler {
     const [courseId, departmentId, levelId, trackId, termId, academicYearId] =
       ids;
 
-    // ============================================================
-    // التأكد من البيانات السابقة
-    // ============================================================
+    if (event.data?.trackId !== trackId) {
+      return;
+    }
 
     if (
       event.data?.courseId !== courseId ||
       event.data?.departmentId !== departmentId ||
       event.data?.levelId !== levelId ||
-      event.data?.trackId !== trackId ||
       event.data?.termId !== termId
     ) {
+      await this.resetProcess(ctx, userId);
+
       return;
     }
 
@@ -989,6 +762,10 @@ export class AssignCourseHandler {
       academicYearId,
     });
   }
+
+  // ============================================================
+  // الصفحة التالية
+  // ============================================================
 
   @Action('ac/next')
   async nextCourses(@Ctx() ctx: Context): Promise<void> {
@@ -1003,10 +780,6 @@ export class AssignCourseHandler {
     const event = this.botEventService.get(userId);
 
     if (!event) {
-      await ctx.reply(
-        'ℹ️ انتهت عملية الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
       return;
     }
 
@@ -1015,14 +788,10 @@ export class AssignCourseHandler {
     }
 
     const currentPage = Number(event.data?.page ?? 1);
+
     const nextPage = currentPage + 1;
 
-    const limit = 8;
-
-    const result = await this.courseService.getCoursesPaginated(
-      nextPage,
-      limit,
-    );
+    const result = await this.courseService.getCoursesPaginated(nextPage, 8);
 
     if (!result.courses.length) {
       return;
@@ -1040,6 +809,10 @@ export class AssignCourseHandler {
     );
   }
 
+  // ============================================================
+  // الصفحة السابقة
+  // ============================================================
+
   @Action('ac/prev')
   async previousCourses(@Ctx() ctx: Context): Promise<void> {
     await ctx.answerCbQuery();
@@ -1053,10 +826,6 @@ export class AssignCourseHandler {
     const event = this.botEventService.get(userId);
 
     if (!event) {
-      await ctx.reply(
-        'ℹ️ انتهت عملية الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
-      );
-
       return;
     }
 
@@ -1072,11 +841,9 @@ export class AssignCourseHandler {
 
     const previousPage = currentPage - 1;
 
-    const limit = 8;
-
     const result = await this.courseService.getCoursesPaginated(
       previousPage,
-      limit,
+      8,
     );
 
     if (!result.courses.length) {
@@ -1092,6 +859,81 @@ export class AssignCourseHandler {
     await ctx.editMessageReplyMarkup(
       courseKeyboard(result.courses, 'ac', result.page, result.totalPages)
         .reply_markup,
+    );
+  }
+
+  // ============================================================
+  // إسناد نفس المادة لسنة أخرى
+  // ============================================================
+
+  @Action('ac/repeat-year')
+  async repeatYear(@Ctx() ctx: Context): Promise<void> {
+    await ctx.answerCbQuery();
+
+    const userId = ctx.from?.id;
+
+    if (!userId) {
+      return;
+    }
+
+    const event = this.botEventService.get(userId);
+
+    if (!event?.data) {
+      await ctx.answerCbQuery('انتهت بيانات العملية.', {
+        show_alert: true,
+      });
+
+      return;
+    }
+
+    const years = await this.academicService.getAcademicYears();
+
+    if (!years.length) {
+      await this.editCurrentMessage(ctx, '❌ لا توجد سنوات دراسية حاليًا.');
+
+      return;
+    }
+
+    const courseId = event.data.courseId;
+
+    const departmentId = event.data.departmentId;
+
+    const levelId = event.data.levelId;
+
+    const trackId = event.data.trackId;
+
+    const termId = event.data.termId;
+
+    if (!courseId || !departmentId || !levelId || !termId) {
+      await this.resetProcess(ctx, userId);
+
+      return;
+    }
+
+    this.botEventService.update(userId, {
+      event: BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR,
+
+      data: {
+        courseId,
+        departmentId,
+        levelId,
+        trackId,
+        termId,
+      },
+    });
+
+    const prefix =
+      trackId !== undefined
+        ? `ac/${courseId}/${departmentId}/${levelId}/${trackId}/${termId}`
+        : `ac/${courseId}/${departmentId}/${levelId}/${termId}`;
+
+    await this.editCurrentMessage(
+      ctx,
+
+      '🔄 <b>إسناد نفس المادة لسنة أخرى</b>\n\n' +
+        '📅 اختر السنة الدراسية الجديدة:',
+
+      academicYearKeyboard(years, prefix),
     );
   }
 
@@ -1111,9 +953,9 @@ export class AssignCourseHandler {
       academicYearId: number;
     },
   ): Promise<void> {
-    // ============================================================
-    // التحقق من جميع البيانات
-    // ============================================================
+    // ------------------------------------------------------------
+    // جلب البيانات
+    // ------------------------------------------------------------
 
     const course = await this.courseService.getCourseById(data.courseId);
 
@@ -1130,8 +972,11 @@ export class AssignCourseHandler {
     );
 
     if (!course || !department || !level || !term || !academicYear) {
-      await ctx.reply(
-        '❌ تعذر التحقق من بيانات الإسناد.\n\n' + 'يرجى بدء العملية من جديد.',
+      await this.editCurrentMessage(
+        ctx,
+
+        '❌ <b>تعذر التحقق من بيانات الإسناد.</b>\n\n' +
+          'يرجى بدء العملية من جديد.',
       );
 
       this.botEventService.delete(userId);
@@ -1139,9 +984,9 @@ export class AssignCourseHandler {
       return;
     }
 
-    // ============================================================
-    // إذا كان هناك Track نتأكد أنه تابع للقسم
-    // ============================================================
+    // ------------------------------------------------------------
+    // التحقق من Track
+    // ------------------------------------------------------------
 
     let track:
       | {
@@ -1158,7 +1003,7 @@ export class AssignCourseHandler {
       track = tracks.find((item) => item.id === data.trackId);
 
       if (!track) {
-        await ctx.reply('❌ التراك المحدد غير تابع لهذا القسم.');
+        await this.editCurrentMessage(ctx, '❌ التراك المحدد غير تابع للقسم.');
 
         this.botEventService.delete(userId);
 
@@ -1166,62 +1011,110 @@ export class AssignCourseHandler {
       }
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     // منع التكرار
-    // ============================================================
+    // ------------------------------------------------------------
 
     const existing = await this.academicService.findCourseOffering({
       courseId: data.courseId,
+
       departmentId: data.departmentId,
+
       trackId: data.trackId,
+
       levelId: data.levelId,
+
       termId: data.termId,
+
       academicYearId: data.academicYearId,
     });
 
     if (existing) {
-      await ctx.reply(
+      await this.editCurrentMessage(
+        ctx,
+
         '⚠️ <b>الكورس مسند مسبقًا</b>\n\n' +
           `📚 الكورس: <b>${this.escapeHtml(course.name)}</b>\n` +
           `🏫 القسم: <b>${this.escapeHtml(department.name)}</b>\n` +
           `🎓 المستوى: <b>${this.escapeHtml(level.name)}</b>\n` +
           (track ? `🛤️ التراك: <b>${this.escapeHtml(track.name)}</b>\n` : '') +
           `📖 الترم: <b>${this.escapeHtml(term.name)}</b>\n` +
-          `📅 السنة: <b>${academicYear.startYear} - ${academicYear.endYear}</b>`,
+          `📅 السنة: <b>${academicYear.startYear} - ${academicYear.endYear}</b>\n\n` +
+          'اختر إجراءً:',
+
         {
-          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: '🔄 إسناد نفس المادة لسنة أخرى',
+
+                  callback_data: 'ac/repeat-year',
+                },
+              ],
+              [
+                {
+                  text: '📚 إسناد مادة أخرى',
+
+                  callback_data: 'ac',
+                },
+              ],
+            ],
+          },
         },
       );
-
-      this.botEventService.delete(userId);
 
       return;
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     // إنشاء CourseOffering
-    // ============================================================
+    // ------------------------------------------------------------
 
     const offering = await this.academicService.createCourseOffering({
       courseId: data.courseId,
+
       departmentId: data.departmentId,
+
       trackId: data.trackId,
+
       levelId: data.levelId,
+
       termId: data.termId,
+
       academicYearId: data.academicYearId,
     });
 
-    // ============================================================
-    // انتهاء العملية
-    // ============================================================
+    // ------------------------------------------------------------
+    // الاحتفاظ بالبيانات
+    // حتى نستطيع إسناد نفس المادة لسنة أخرى
+    // ------------------------------------------------------------
 
-    this.botEventService.delete(userId);
+    this.botEventService.update(userId, {
+      event: BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR,
 
-    // ============================================================
+      data: {
+        courseId: data.courseId,
+
+        departmentId: data.departmentId,
+
+        levelId: data.levelId,
+
+        trackId: data.trackId,
+
+        termId: data.termId,
+
+        academicYearId: data.academicYearId,
+      },
+    });
+
+    // ------------------------------------------------------------
     // النتيجة
-    // ============================================================
+    // ------------------------------------------------------------
 
-    await ctx.reply(
+    await this.editCurrentMessage(
+      ctx,
+
       '✅ <b>تم إسناد الكورس بنجاح</b>\n\n' +
         `📚 الكورس: <b>${this.escapeHtml(course.name)}</b>\n` +
         `🏫 القسم: <b>${this.escapeHtml(department.name)}</b>\n` +
@@ -1230,14 +1123,34 @@ export class AssignCourseHandler {
         `📖 الترم: <b>${this.escapeHtml(term.name)}</b>\n` +
         `📅 السنة الدراسية: <b>${academicYear.startYear} - ${academicYear.endYear}</b>\n\n` +
         `🆔 Offering ID: <code>${offering.id}</code>`,
+
       {
-        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '🔄 إسناد نفس المادة لسنة أخرى',
+
+                callback_data: 'ac/repeat-year',
+              },
+            ],
+            [
+              {
+                text: '📚 إسناد مادة أخرى',
+
+                callback_data: 'ac',
+              },
+            ],
+          ],
+        },
       },
     );
   }
 
   // ============================================================
-  // استخراج ID واحد من Callback
+  // استخراج ID واحد
+  //
+  // ac/12
   // ============================================================
 
   private getCallbackId(ctx: Context): number | null {
@@ -1257,7 +1170,9 @@ export class AssignCourseHandler {
   }
 
   // ============================================================
-  // استخراج عدة IDs من Callback
+  // استخراج عدة IDs
+  //
+  // ac/12/2/3
   // ============================================================
 
   private getCallbackIds(ctx: Context, expectedCount: number): number[] | null {
@@ -1277,7 +1192,7 @@ export class AssignCourseHandler {
   }
 
   // ============================================================
-  // الحصول على Regex Match
+  // استخراج Match
   // ============================================================
 
   private getCallbackMatch(ctx: Context): RegExpExecArray | null {
@@ -1288,10 +1203,6 @@ export class AssignCourseHandler {
     }
 
     const data = callbackQuery.data;
-
-    // ============================================================
-    // نحدد الـ pattern حسب عدد أجزاء callback
-    // ============================================================
 
     const parts = data.split('/');
 
@@ -1306,6 +1217,40 @@ export class AssignCourseHandler {
     }
 
     return [data, ...ids] as unknown as RegExpExecArray;
+  }
+
+  // ============================================================
+  // تعديل الرسالة الحالية
+  // ============================================================
+
+  private async editCurrentMessage(
+    ctx: Context,
+    text: string,
+    keyboard?: any,
+  ): Promise<void> {
+    try {
+      await ctx.editMessageText(text, {
+        parse_mode: 'HTML',
+        ...keyboard,
+      });
+    } catch (error) {
+      console.error('Failed to edit Telegram message:', error);
+    }
+  }
+
+  // ============================================================
+  // إعادة ضبط العملية
+  // ============================================================
+
+  private async resetProcess(ctx: Context, userId: number): Promise<void> {
+    this.botEventService.delete(userId);
+
+    await this.editCurrentMessage(
+      ctx,
+
+      '❌ <b>بيانات عملية الإسناد غير صحيحة.</b>\n\n' +
+        'يرجى بدء العملية من جديد.',
+    );
   }
 
   // ============================================================

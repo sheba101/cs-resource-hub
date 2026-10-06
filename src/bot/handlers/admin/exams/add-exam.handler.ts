@@ -479,7 +479,7 @@ export class AddExamHandler {
     const event = this.botEventService.get(this.getUserId(ctx));
 
     const hasTrack =
-      department.name === 'تقنية المعلومات' &&
+      department.name === 'تقنية معلومات' &&
       (level.number === 3 || level.number === 4);
 
     this.botEventService.update(this.getUserId(ctx), {
@@ -621,7 +621,7 @@ export class AddExamHandler {
     }
 
     const hasTrack =
-      department.name === 'تقنية المعلومات' &&
+      department.name === 'تقنية معلومات' &&
       (level.number === 3 || level.number === 4);
 
     // =========================================================
