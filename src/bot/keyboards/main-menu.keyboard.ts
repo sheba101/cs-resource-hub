@@ -29,6 +29,7 @@ export function mainMenuKeyboard(isAdmin: boolean = false, userId?: number) {
       Markup.button.callback('📖 إدارة الكورسات', 'admin_courses'),
       Markup.button.callback('👥 إدارة المستخدمين', 'admin_users'),
     ],
+    [Markup.button.callback('🔗 إدارة المصادر الخارجية', 'admin_sources')],
   ];
 
   const isSuperUser = userId !== undefined && SUPER_USER_IDS.includes(userId);

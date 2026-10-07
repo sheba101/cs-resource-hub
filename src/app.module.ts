@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { BotModule } from './bot/bot.module';
 import { APP_GUARD } from '@nestjs/core';
 import { TelegramCallbackGuard } from './bot/guards/telegram-callback.guard';
+import { ExternalModule } from './external/external.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TelegramCallbackGuard } from './bot/guards/telegram-callback.guard';
 
     PrismaModule,
     BotModule,
+    ExternalModule,
   ],
 
   providers: [

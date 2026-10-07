@@ -18,6 +18,7 @@ import { UserHandlers } from './handlers/user/user.handlers';
 import { AdminHandlers } from './handlers/admin/admin.handlers';
 import { CommonHandlers } from './handlers/common/common.handlers';
 import { CommandHandlers } from './handlers/commands/command.handlers';
+import { ExternalModule } from 'src/external/external.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CommandHandlers } from './handlers/commands/command.handlers';
     CourseModule,
     MaterialModule,
     ExamModule,
+    ExternalModule,
   ],
   providers: [
     StartHandler,

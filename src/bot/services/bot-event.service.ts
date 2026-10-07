@@ -28,6 +28,17 @@ export enum BotEventType {
   WAITING_EXAM_ACADEMIC_YEAR,
   WAITING_EXAM_TYPE,
   WAITING_EXAM_REUSE,
+  // ============================================================
+  // External Resources
+  // ============================================================
+
+  WAITING_EXTERNAL_RESOURCE_CAPTION,
+
+  WAITING_EXTERNAL_CATEGORY_NAME,
+  WAITING_EXTERNAL_CATEGORY_PARENT,
+
+  WAITING_EXTERNAL_RESOURCE_CATEGORY,
+  WAITING_EXTERNAL_RESOURCE_DOCUMENT,
 
   // Users
   WAITING_DELETE_USER,

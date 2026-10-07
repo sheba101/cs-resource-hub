@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { Action, Ctx, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
@@ -347,7 +348,6 @@ export class AssignCourseHandler {
       courseId,
       departmentId,
       levelId,
-      trackId: undefined,
     });
   }
 
@@ -355,10 +355,14 @@ export class AssignCourseHandler {
   // اختيار Track
   //
   // ac/courseId/departmentId/levelId/trackId
+  //
+  // ملاحظة:
+  // هذا الـ callback له نفس عدد IDs الخاص باختيار الترم.
+  // لذلك تتم المعالجة حسب event.event.
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async selectTrack(@Ctx() ctx: Context): Promise<void> {
+  async handleFourIds(@Ctx() ctx: Context): Promise<void> {
     await ctx.answerCbQuery();
 
     const userId = ctx.from?.id;
@@ -373,47 +377,91 @@ export class AssignCourseHandler {
       return;
     }
 
-    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TRACK) {
-      return;
-    }
-
     const ids = this.getCallbackIds(ctx, 4);
 
     if (!ids) {
       return;
     }
 
-    const [courseId, departmentId, levelId, trackId] = ids;
+    const [courseId, departmentId, levelId, fourthId] = ids;
 
-    if (
-      event.data?.courseId !== courseId ||
-      event.data?.departmentId !== departmentId ||
-      event.data?.levelId !== levelId
-    ) {
-      await this.resetProcess(ctx, userId);
+    // ============================================================
+    // الحالة الأولى: اختيار Track
+    // ============================================================
 
-      return;
-    }
+    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TRACK) {
+      const trackId = fourthId;
 
-    const tracks =
-      await this.academicService.getTracksByDepartmentId(departmentId);
+      if (
+        event.data?.courseId !== courseId ||
+        event.data?.departmentId !== departmentId ||
+        event.data?.levelId !== levelId
+      ) {
+        await this.resetProcess(ctx, userId);
 
-    const track = tracks.find((item) => item.id === trackId);
+        return;
+      }
 
-    if (!track) {
-      await ctx.answerCbQuery('التراك غير تابع لهذا القسم.', {
-        show_alert: true,
+      const tracks =
+        await this.academicService.getTracksByDepartmentId(departmentId);
+
+      const track = tracks.find((item) => item.id === trackId);
+
+      if (!track) {
+        await ctx.answerCbQuery('التراك غير تابع لهذا القسم.', {
+          show_alert: true,
+        });
+
+        return;
+      }
+
+      await this.showTerms(ctx, userId, {
+        courseId,
+        departmentId,
+        levelId,
+        trackId,
       });
 
       return;
     }
 
-    await this.showTerms(ctx, userId, {
-      courseId,
-      departmentId,
-      levelId,
-      trackId,
-    });
+    // ============================================================
+    // الحالة الثانية: اختيار الترم بدون Track
+    // ============================================================
+
+    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TERM) {
+      const termId = fourthId;
+
+      // هذه الحالة يجب أن تكون بدون Track
+      if (event.data?.trackId !== undefined) {
+        return;
+      }
+
+      if (
+        event.data?.courseId !== courseId ||
+        event.data?.departmentId !== departmentId ||
+        event.data?.levelId !== levelId
+      ) {
+        await this.resetProcess(ctx, userId);
+
+        return;
+      }
+
+      await this.handleTermSelection(ctx, userId, event, {
+        courseId,
+        departmentId,
+        levelId,
+        termId,
+      });
+
+      return;
+    }
+
+    // ============================================================
+    // أي حالة أخرى غير صحيحة
+    // ============================================================
+
+    return;
   }
 
   // ============================================================
@@ -458,128 +506,6 @@ export class AssignCourseHandler {
 
       termKeyboard(terms, prefix),
     );
-  }
-
-  // ============================================================
-  // اختيار الترم بدون Track
-  //
-  // ac/courseId/departmentId/levelId/termId
-  // ============================================================
-
-  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async selectTerm(@Ctx() ctx: Context): Promise<void> {
-    await ctx.answerCbQuery();
-
-    const userId = ctx.from?.id;
-
-    if (!userId) {
-      return;
-    }
-
-    const event = this.botEventService.get(userId);
-
-    if (!event) {
-      return;
-    }
-
-    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TERM) {
-      return;
-    }
-
-    const ids = this.getCallbackIds(ctx, 4);
-
-    if (!ids) {
-      return;
-    }
-
-    const [courseId, departmentId, levelId, termId] = ids;
-
-    // ------------------------------------------------------------
-    // هذه الحالة تكون بدون Track
-    // ------------------------------------------------------------
-
-    if (event.data?.trackId !== undefined) {
-      return;
-    }
-
-    if (
-      event.data?.courseId !== courseId ||
-      event.data?.departmentId !== departmentId ||
-      event.data?.levelId !== levelId
-    ) {
-      await this.resetProcess(ctx, userId);
-
-      return;
-    }
-
-    await this.handleTermSelection(ctx, userId, event, {
-      courseId,
-      departmentId,
-      levelId,
-      termId,
-      trackId: undefined,
-    });
-  }
-
-  // ============================================================
-  // اختيار الترم مع Track
-  //
-  // ac/courseId/departmentId/levelId/trackId/termId
-  // ============================================================
-
-  @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async selectTermWithTrack(@Ctx() ctx: Context): Promise<void> {
-    await ctx.answerCbQuery();
-
-    const userId = ctx.from?.id;
-
-    if (!userId) {
-      return;
-    }
-
-    const event = this.botEventService.get(userId);
-
-    if (!event) {
-      return;
-    }
-
-    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_TERM) {
-      return;
-    }
-
-    const ids = this.getCallbackIds(ctx, 5);
-
-    if (!ids) {
-      return;
-    }
-
-    const [courseId, departmentId, levelId, trackId, termId] = ids;
-
-    // ------------------------------------------------------------
-    // هذه الحالة يجب أن تكون مع Track
-    // ------------------------------------------------------------
-
-    if (event.data?.trackId !== trackId) {
-      return;
-    }
-
-    if (
-      event.data?.courseId !== courseId ||
-      event.data?.departmentId !== departmentId ||
-      event.data?.levelId !== levelId
-    ) {
-      await this.resetProcess(ctx, userId);
-
-      return;
-    }
-
-    await this.handleTermSelection(ctx, userId, event, {
-      courseId,
-      departmentId,
-      levelId,
-      trackId,
-      termId,
-    });
   }
 
   // ============================================================
@@ -641,13 +567,16 @@ export class AssignCourseHandler {
   }
 
   // ============================================================
-  // اختيار السنة بدون Track
+  // اختيار الترم مع Track
   //
-  // ac/courseId/departmentId/levelId/termId/yearId
+  // ac/courseId/departmentId/levelId/trackId/termId
+  //
+  // اختيار السنة بدون Track له أيضًا 5 IDs.
+  // لذلك يتم التفريق عن طريق event.event.
   // ============================================================
 
   @Action(/^ac\/(\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+)$/)
-  async selectAcademicYear(@Ctx() ctx: Context): Promise<void> {
+  async handleFiveIds(@Ctx() ctx: Context): Promise<void> {
     await ctx.answerCbQuery();
 
     const userId = ctx.from?.id;
@@ -662,45 +591,84 @@ export class AssignCourseHandler {
       return;
     }
 
-    if (event.event !== BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR) {
-      return;
-    }
-
     const ids = this.getCallbackIds(ctx, 5);
 
     if (!ids) {
       return;
     }
 
-    const [courseId, departmentId, levelId, termId, academicYearId] = ids;
+    const [courseId, departmentId, levelId, fourthId, fifthId] = ids;
 
-    // ------------------------------------------------------------
-    // إذا كان Track موجودًا فهذه ليست حالة بدون Track
-    // ------------------------------------------------------------
+    // ============================================================
+    // الحالة الأولى:
+    // اختيار الترم مع Track
+    // ============================================================
 
-    if (event.data?.trackId !== undefined) {
+    if (event.event === BotEventType.WAITING_COURSE_OFFERING_TERM) {
+      const trackId = fourthId;
+      const termId = fifthId;
+
+      if (event.data?.trackId !== trackId) {
+        return;
+      }
+
+      if (
+        event.data?.courseId !== courseId ||
+        event.data?.departmentId !== departmentId ||
+        event.data?.levelId !== levelId
+      ) {
+        await this.resetProcess(ctx, userId);
+
+        return;
+      }
+
+      await this.handleTermSelection(ctx, userId, event, {
+        courseId,
+        departmentId,
+        levelId,
+        trackId,
+        termId,
+      });
+
       return;
     }
 
-    if (
-      event.data?.courseId !== courseId ||
-      event.data?.departmentId !== departmentId ||
-      event.data?.levelId !== levelId ||
-      event.data?.termId !== termId
-    ) {
-      await this.resetProcess(ctx, userId);
+    // ============================================================
+    // الحالة الثانية:
+    // اختيار السنة بدون Track
+    // ============================================================
+
+    if (event.event === BotEventType.WAITING_COURSE_OFFERING_ACADEMIC_YEAR) {
+      const termId = fourthId;
+      const academicYearId = fifthId;
+
+      if (event.data?.trackId !== undefined) {
+        return;
+      }
+
+      if (
+        event.data?.courseId !== courseId ||
+        event.data?.departmentId !== departmentId ||
+        event.data?.levelId !== levelId ||
+        event.data?.termId !== termId
+      ) {
+        await this.resetProcess(ctx, userId);
+
+        return;
+      }
+
+      await this.finishAssignment(ctx, userId, {
+        courseId,
+        departmentId,
+        levelId,
+        termId,
+        academicYearId,
+      });
 
       return;
     }
 
-    await this.finishAssignment(ctx, userId, {
-      courseId,
-      departmentId,
-      levelId,
-      trackId: undefined,
-      termId,
-      academicYearId,
-    });
+    return;
   }
 
   // ============================================================

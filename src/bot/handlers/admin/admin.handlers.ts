@@ -7,6 +7,7 @@ import { DeleteExamHandler } from './exams/delete-exam.handler';
 import { PromoteUserHandler } from './users/promote-user.handler';
 import { DemoteAdminHandler } from './users/demote-user.handler';
 import { AddCourseHandler } from './courses/add-course.handler';
+import { ExternalHandler } from './external/external.handler';
 
 export const AdminHandlers = [
   EditCourseHandler,
@@ -19,4 +20,5 @@ export const AdminHandlers = [
   DemoteAdminHandler,
   AddCourseHandler,
   EditCourseHandler,
+  ExternalHandler,
 ];

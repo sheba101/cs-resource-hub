@@ -1,14 +1,20 @@
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { Action, Ctx, On, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
 
+import { ExternalResourceService } from 'src/external/services/external-resource.service';
+
 import { AddMaterialHandler } from '../admin/materials/add-material.handler';
 import { AddExamHandler } from '../admin/exams/add-exam.handler';
+
 import {
+  BotEvent,
   BotEventService,
   BotEventType,
 } from '../../services/bot-event.service';
@@ -30,6 +36,7 @@ export class UploadDocumentHandler {
     private readonly configService: ConfigService,
     private readonly addMaterialHandler: AddMaterialHandler,
     private readonly addExamHandler: AddExamHandler,
+    private readonly externalResourceService: ExternalResourceService,
   ) {
     this.storageChannelId =
       this.configService.get<string>('MATERIAL_STORAGE_CHANNEL_ID') ?? '';
@@ -103,6 +110,15 @@ export class UploadDocumentHandler {
       case BotEventType.WAITING_EXAM_TITLE:
         return 'بانتظار عنوان الاختبار';
 
+      case BotEventType.WAITING_EXTERNAL_RESOURCE_DOCUMENT:
+        return 'بانتظار ملف المصدر الخارجي';
+
+      case BotEventType.WAITING_EXTERNAL_RESOURCE_CAPTION:
+        return 'بانتظار كابشن المصدر الخارجي';
+
+      case BotEventType.WAITING_EXTERNAL_CATEGORY_NAME:
+        return 'بانتظار اسم التصنيف الخارجي';
+
       case BotEventType.WAITING_COURSE_NAME:
         return 'بانتظار اسم الكورس';
 
@@ -160,7 +176,7 @@ export class UploadDocumentHandler {
     });
 
     // ============================================================
-    // Get local bot event
+    // Get Bot Event
     // ============================================================
 
     const event = this.botEventService.get(userId);
@@ -169,6 +185,24 @@ export class UploadDocumentHandler {
       this.logger.debug(
         `DOCUMENT ignored: no active bot event userId=${userId}`,
       );
+
+      return;
+    }
+
+    this.logger.log(
+      `DOCUMENT event=${this.getEventName(event.event)} userId=${userId}`,
+    );
+
+    // ============================================================
+    // EXTERNAL RESOURCE DOCUMENT
+    //
+    // مهم:
+    // يجب معالجة المصدر الخارجي قبل uploadSession
+    // لأن المصدر الخارجي لا يستخدم UploadSessionService.
+    // ============================================================
+
+    if (event.event === BotEventType.WAITING_EXTERNAL_RESOURCE_DOCUMENT) {
+      await this.handleExternalResourceDocument(ctx, message, event);
 
       return;
     }
@@ -193,6 +227,8 @@ export class UploadDocumentHandler {
 
     // ============================================================
     // Get temporary upload session
+    //
+    // فقط Material / Exam يحتاجون UploadSession
     // ============================================================
 
     const session = this.uploadSessionService.get(userId);
@@ -318,6 +354,200 @@ export class UploadDocumentHandler {
   }
 
   // ============================================================
+  // EXTERNAL RESOURCE DOCUMENT
+  // ============================================================
+
+  private async handleExternalResourceDocument(
+    ctx: Context,
+    message: any,
+    event: BotEvent,
+  ): Promise<void> {
+    const userId = this.getUserId(ctx);
+
+    if (!userId) {
+      return;
+    }
+
+    // ============================================================
+    // Category ID
+    // ============================================================
+
+    const categoryId =
+      typeof event.data?.categoryId === 'number'
+        ? event.data.categoryId
+        : undefined;
+
+    if (categoryId === undefined) {
+      this.logger.warn(
+        `EXTERNAL RESOURCE: categoryId missing userId=${userId}`,
+      );
+
+      this.botEventService.delete(userId);
+
+      await ctx.reply(
+        '❌ حدث خطأ في بيانات العملية.\n\n' + 'أعد عملية إضافة المصدر من جديد.',
+      );
+
+      return;
+    }
+
+    // ============================================================
+    // Get category
+    // ============================================================
+
+    let category;
+
+    try {
+      category = await this.externalResourceService.getCategory(categoryId);
+    } catch (error) {
+      this.logger.error(
+        `EXTERNAL RESOURCE: category not found ` +
+          `categoryId=${categoryId} userId=${userId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      this.botEventService.delete(userId);
+
+      await ctx.reply(
+        '❌ التصنيف الذي اخترته لم يعد موجودًا.\n\n' +
+          'أعد عملية إضافة المصدر من جديد.',
+      );
+
+      return;
+    }
+
+    // ============================================================
+    // Make sure category is a leaf category
+    // ============================================================
+
+    const hasChildren =
+      await this.externalResourceService.categoryHasChildren(categoryId);
+
+    if (hasChildren) {
+      this.botEventService.delete(userId);
+
+      await ctx.reply(
+        '⚠️ لا يمكن إضافة مصدر داخل هذا التصنيف.\n\n' +
+          'اختر تصنيفًا فرعيًا نهائيًا.',
+      );
+
+      return;
+    }
+
+    // ============================================================
+    // Chat ID
+    // ============================================================
+
+    const chatId = ctx.chat?.id;
+
+    if (chatId === undefined) {
+      await ctx.reply('❌ تعذر تحديد المحادثة.');
+
+      return;
+    }
+
+    const telegramChatId = String(chatId);
+
+    // ============================================================
+    // Message ID
+    // ============================================================
+
+    const telegramMessageId = message.message_id;
+
+    // ============================================================
+    // File ID
+    // ============================================================
+
+    const telegramFileId =
+      typeof message.document?.file_id === 'string'
+        ? message.document.file_id
+        : undefined;
+
+    if (!telegramFileId) {
+      this.logger.warn(
+        `EXTERNAL RESOURCE: telegramFileId missing userId=${userId}`,
+      );
+
+      await ctx.reply(
+        '❌ تعذر الحصول على ملف PDF.\n\n' + 'أعد إرسال الملف من جديد.',
+      );
+
+      return;
+    }
+
+    // ============================================================
+    // File name
+    //
+    // نستخدم اسم الملف كـ title
+    // والكابشن سيكون رسالة النص التالية.
+    // ============================================================
+
+    const title =
+      typeof message.document?.file_name === 'string' &&
+      message.document.file_name.trim()
+        ? message.document.file_name.trim()
+        : 'مصدر خارجي';
+
+    // ============================================================
+    // Update Bot Event
+    // ============================================================
+
+    this.botEventService.update(userId, {
+      event: BotEventType.WAITING_EXTERNAL_RESOURCE_CAPTION,
+
+      messageId: telegramMessageId,
+
+      chatId: telegramChatId,
+
+      data: {
+        ...(event.data ?? {}),
+
+        categoryId,
+
+        telegramChatId,
+
+        telegramMessageId,
+
+        telegramFileId,
+
+        title,
+
+        originalMessageId: telegramMessageId,
+
+        originalCaption:
+          typeof message.caption === 'string' ? message.caption : undefined,
+      },
+    });
+
+    // ============================================================
+    // Log
+    // ============================================================
+
+    this.logAction(ctx, 'EXTERNAL_RESOURCE_DOCUMENT_ACCEPTED', {
+      categoryId,
+      categoryName: category.name,
+      title,
+      telegramFileId,
+      telegramChatId,
+      telegramMessageId,
+    });
+
+    // ============================================================
+    // Ask for caption
+    // ============================================================
+
+    await ctx.reply(
+      '📄 <b>تم استلام ملف PDF بنجاح</b>\n\n' +
+        `📁 التصنيف: <b>${category.name}</b>\n` +
+        `📄 الملف: <b>${title}</b>\n\n` +
+        '📝 الآن أرسل <b>الكابشن / وصف المصدر</b>.',
+      {
+        parse_mode: 'HTML',
+      },
+    );
+  }
+
+  // ============================================================
   // CANCEL OLD + CONTINUE WITH NEW FILE
   // ============================================================
 
@@ -332,10 +562,6 @@ export class UploadDocumentHandler {
     }
 
     this.logAction(ctx, 'CANCEL_OLD_AND_CONTINUE');
-
-    // ============================================================
-    // Get Event
-    // ============================================================
 
     const event = this.botEventService.get(userId);
 
@@ -355,10 +581,6 @@ export class UploadDocumentHandler {
       return;
     }
 
-    // ============================================================
-    // Get Session
-    // ============================================================
-
     const session = this.uploadSessionService.get(userId);
 
     if (!session) {
@@ -375,10 +597,6 @@ export class UploadDocumentHandler {
       return;
     }
 
-    // ============================================================
-    // Replace old file
-    // ============================================================
-
     const updated = this.uploadSessionService.replaceWithPendingFile(userId);
 
     if (!updated) {
@@ -388,10 +606,6 @@ export class UploadDocumentHandler {
     }
 
     await this.safeAnswerCbQuery(ctx, 'تم اعتماد الملف الجديد');
-
-    // ============================================================
-    // Edit message
-    // ============================================================
 
     try {
       if (
@@ -440,10 +654,6 @@ export class UploadDocumentHandler {
 
     this.logAction(ctx, 'RETURN_TO_OLD');
 
-    // ============================================================
-    // Get Event
-    // ============================================================
-
     const event = this.botEventService.get(userId);
 
     if (!event) {
@@ -462,10 +672,6 @@ export class UploadDocumentHandler {
       return;
     }
 
-    // ============================================================
-    // Get Session
-    // ============================================================
-
     const session = this.uploadSessionService.get(userId);
 
     if (!session) {
@@ -482,10 +688,6 @@ export class UploadDocumentHandler {
       return;
     }
 
-    // ============================================================
-    // Restore old file
-    // ============================================================
-
     const updated = this.uploadSessionService.restoreOldFile(userId);
 
     if (!updated) {
@@ -495,10 +697,6 @@ export class UploadDocumentHandler {
     }
 
     await this.safeAnswerCbQuery(ctx, 'تم تجاهل الملف الجديد');
-
-    // ============================================================
-    // Edit message
-    // ============================================================
 
     try {
       if (
